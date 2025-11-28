@@ -1,0 +1,222 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Kurye Teslimat Takip</title>
+    <style>
+        body { font-family: sans-serif; background: #f4f4f9; padding: 20px; color: #333; }
+        h2 { text-align: center; color: #2c3e50; }
+        .card { background: white; padding: 15px; border-radius: 8px; box-shadow: 0 2px 5px rgba(0,0,0,0.1); margin-bottom: 20px; }
+        label { display: block; margin-top: 10px; font-weight: bold; }
+        input, textarea { width: 100%; padding: 8px; margin-top: 5px; border: 1px solid #ddd; border-radius: 4px; box-sizing: border-box; }
+        button { width: 100%; padding: 12px; margin-top: 15px; border: none; border-radius: 5px; font-size: 16px; cursor: pointer; }
+        .btn-green { background: #27ae60; color: white; }
+        .btn-blue { background: #2980b9; color: white; }
+        .btn-red { background: #c0392b; color: white; margin-top: 5px; }
+        .log-item { background: #fff; border-bottom: 1px solid #eee; padding: 10px; }
+        .log-time { font-size: 0.85em; color: #666; }
+        .log-link a { color: #2980b9; text-decoration: none; font-weight: bold; }
+        #status { text-align: center; font-size: 0.9em; margin-bottom: 10px; color: #d35400; }
+    </style>
+</head>
+<body>
+
+    <h2>📍 Kurye Günlüğü</h2>
+    <div id="status">Konum bekleniyor...</div>
+
+    <div class="card">
+        <label>Yer Adı / Tanım:</label>
+        <input type="text" id="placeName" placeholder="Örn: Merkez Depo, Dükkan...">
+        <div id="suggestionBox" style="font-size:0.9em; color:#27ae60; margin-top:5px;"></div>
+
+        <label>Notlar (Ne götürdün/getirdin?):</label>
+        <textarea id="notes" rows="3" placeholder="Örn: 2 Pizza götürüldü..."></textarea>
+        
+        <input type="hidden" id="lat">
+        <input type="hidden" id="lng">
+
+        <button class="btn-green" onclick="getLocation()">📍 Konumu Güncelle & Kontrol Et</button>
+        <button class="btn-blue" onclick="addRecord()">💾 Kaydı Listeye Ekle</button>
+    </div>
+
+    <div class="card">
+        <h3>Bugünkü Kayıtlar</h3>
+        <div id="logList"></div>
+        <button class="btn-blue" onclick="downloadReport()">DY Raporu İndir (Patron İçin)</button>
+        <button class="btn-red" onclick="clearData()">🗑️ Listeyi Temizle</button>
+    </div>
+
+    <script>
+        let savedLocations = JSON.parse(localStorage.getItem('savedLocations')) || [];
+        let dailyLogs = JSON.parse(localStorage.getItem('dailyLogs')) || [];
+
+        // Sayfa açılınca listeyi yükle
+        window.onload = function() {
+            renderLogs();
+        };
+
+        // Konumu çekme fonksiyonu
+        function getLocation() {
+            const status = document.getElementById('status');
+            const suggestionBox = document.getElementById('suggestionBox');
+            
+            if (!navigator.geolocation) {
+                status.textContent = "Tarayıcın konumu desteklemiyor.";
+                return;
+            }
+
+            status.textContent = "Konum alınıyor...";
+
+            navigator.geolocation.getCurrentPosition((position) => {
+                const lat = position.coords.latitude;
+                const lng = position.coords.longitude;
+
+                document.getElementById('lat').value = lat;
+                document.getElementById('lng').value = lng;
+                status.textContent = "Konum alındı! (" + lat.toFixed(5) + ", " + lng.toFixed(5) + ")";
+
+                // Eski kayıtları kontrol et (Öneri Sistemi)
+                let foundName = checkNearby(lat, lng);
+                if (foundName) {
+                    suggestionBox.textContent = "💡 Öneri: Burası daha önce '" + foundName + "' olarak kaydedilmiş.";
+                    document.getElementById('placeName').value = foundName; // Otomatik doldur
+                } else {
+                    suggestionBox.textContent = "";
+                }
+
+            }, () => {
+                status.textContent = "Konum alınamadı. Lütfen GPS izni verin.";
+            });
+        }
+
+        // Yakındaki eski kayıtları bulma (50 metre yarıçap)
+        function checkNearby(lat, lng) {
+            for (let loc of savedLocations) {
+                let dist = getDistance(lat, lng, loc.lat, loc.lng);
+                if (dist < 0.05) { // 50 metre (0.05 km)
+                    return loc.name;
+                }
+            }
+            return null;
+        }
+
+        // İki koordinat arası mesafe hesaplama (Haversine Formülü)
+        function getDistance(lat1, lon1, lat2, lon2) {
+            var R = 6371; // Dünya yarıçapı km
+            var dLat = deg2rad(lat2-lat1);
+            var dLon = deg2rad(lon2-lon1); 
+            var a = Math.sin(dLat/2) * Math.sin(dLat/2) +
+                    Math.cos(deg2rad(lat1)) * Math.cos(deg2rad(lat2)) * Math.sin(dLon/2) * Math.sin(dLon/2); 
+            var c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a)); 
+            return R * c;
+        }
+
+        function deg2rad(deg) {
+            return deg * (Math.PI/180);
+        }
+
+        // Kayıt Ekleme
+        function addRecord() {
+            const name = document.getElementById('placeName').value;
+            const note = document.getElementById('notes').value;
+            const lat = document.getElementById('lat').value;
+            const lng = document.getElementById('lng').value;
+            
+            if (!lat || !name) {
+                alert("Lütfen önce konumu alın ve bir yer ismi girin.");
+                return;
+            }
+
+            const now = new Date();
+            const timeString = now.toLocaleTimeString('tr-TR', {hour: '2-digit', minute:'2-digit'});
+
+            const record = {
+                id: Date.now(),
+                time: timeString,
+                name: name,
+                note: note,
+                lat: lat,
+                lng: lng,
+                mapLink: `https://www.google.com/maps?q=${lat},${lng}`
+            };
+
+            // Günlük listeye ekle
+            dailyLogs.push(record);
+            localStorage.setItem('dailyLogs', JSON.stringify(dailyLogs));
+
+            // Gelecek öneriler için konumu hafızaya kaydet (Eğer yeni bir isimse)
+            let exists = savedLocations.find(l => l.name === name);
+            if (!exists) {
+                savedLocations.push({name: name, lat: lat, lng: lng});
+                localStorage.setItem('savedLocations', JSON.stringify(savedLocations));
+            }
+
+            // Formu temizle
+            document.getElementById('placeName').value = "";
+            document.getElementById('notes').value = "";
+            document.getElementById('suggestionBox').textContent = "";
+            
+            renderLogs();
+        }
+
+        // Listeyi Ekrana Yazma
+        function renderLogs() {
+            const list = document.getElementById('logList');
+            list.innerHTML = "";
+            
+            dailyLogs.slice().reverse().forEach(log => {
+                list.innerHTML += `
+                    <div class="log-item">
+                        <div class="log-time">⏰ ${log.time}</div>
+                        <strong>${log.name}</strong><br>
+                        <em>${log.note}</em><br>
+                        <span class="log-link"><a href="${log.mapLink}" target="_blank">📍 Haritada Göster</a></span>
+                    </div>
+                `;
+            });
+        }
+
+        // Rapor İndirme (Patron İçin HTML)
+        function downloadReport() {
+            if(dailyLogs.length === 0) { alert("İndirilecek kayıt yok."); return; }
+            
+            let htmlContent = `
+                <html><head><meta charset='utf-8'><title>Günlük Rapor</title>
+                <style>table {width: 100%; border-collapse: collapse;} th, td {border: 1px solid black; padding: 8px; text-align: left;} th {background-color: #f2f2f2;}</style>
+                </head><body>
+                <h2>Günlük Teslimat Raporu - ${new Date().toLocaleDateString('tr-TR')}</h2>
+                <table>
+                    <tr><th>Saat</th><th>Yer Adı</th><th>Notlar</th><th>Konum Linki</th></tr>`;
+            
+            dailyLogs.forEach(log => {
+                htmlContent += `<tr>
+                    <td>${log.time}</td>
+                    <td>${log.name}</td>
+                    <td>${log.note}</td>
+                    <td><a href="${log.mapLink}">Haritada Aç</a></td>
+                </tr>`;
+            });
+
+            htmlContent += `</table></body></html>`;
+
+            const blob = new Blob([htmlContent], { type: 'text/html' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `Rapor_${new Date().toLocaleDateString('tr-TR').replace(/\./g, '-')}.html`;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+        }
+
+        function clearData() {
+            if(confirm("Tüm günlük kayıtlar silinecek. Emin misin?")) {
+                dailyLogs = [];
+                localStorage.setItem('dailyLogs', JSON.stringify(dailyLogs));
+                renderLogs();
+            }
+        }
+    </script>
+</body>
+</html>
