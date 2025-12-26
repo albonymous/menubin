@@ -1,0 +1,219 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>FitAI Elite</title>
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/mobilenet"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;500;700&display=swap" rel="stylesheet">
+    <style>
+        :root { --accent: #2dd4bf; --bg: #0f172a; --card: #1e293b; --text: #f8fafc; --danger: #fb7185; }
+        * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+        body { font-family: 'Poppins', sans-serif; margin: 0; background: var(--bg); color: var(--text); overflow-x: hidden; }
+        
+        /* App Shell */
+        .app-shell { max-width: 450px; margin: 0 auto; min-height: 100vh; display: flex; flex-direction: column; position: relative; }
+        
+        /* Glass Header */
+        header { padding: 30px 20px; background: rgba(30, 41, 59, 0.7); backdrop-filter: blur(10px); position: sticky; top: 0; z-index: 100; border-bottom: 1px solid rgba(255,255,255,0.1); text-align: center; }
+        .calories-main { font-size: 3rem; font-weight: 700; color: var(--accent); text-shadow: 0 0 20px rgba(45, 212, 191, 0.3); }
+        
+        /* Visual Camera Hub */
+        #camera-hub { position: relative; width: 90%; margin: 20px auto; height: 320px; border-radius: 30px; border: 2px solid var(--accent); overflow: hidden; box-shadow: 0 20px 50px rgba(0,0,0,0.5); }
+        video, #preview { width: 100%; height: 100%; object-fit: cover; transition: 0.5s; }
+        
+        /* Smart Detection Panel */
+        .panel { background: var(--card); margin: 15px 20px; padding: 20px; border-radius: 25px; box-shadow: 0 10px 30px rgba(0,0,0,0.2); transform: translateY(0); transition: 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275); }
+        .hidden { display: none; transform: translateY(50px); opacity: 0; }
+        
+        /* Blacklist Warning */
+        .warning-alert { color: var(--danger); border: 2px solid var(--danger); padding: 15px; border-radius: 15px; margin-bottom: 15px; font-weight: 700; animation: shake 0.5s; }
+        @keyframes shake { 0%, 100% { transform: translateX(0); } 25% { transform: translateX(-5px); } 75% { transform: translateX(5px); } }
+
+        /* Modern Buttons */
+        .btn-group { display: flex; gap: 10px; }
+        .btn { flex: 1; padding: 18px; border-radius: 18px; border: none; font-weight: 700; cursor: pointer; transition: 0.3s; font-size: 14px; text-transform: uppercase; letter-spacing: 1px; }
+        .btn-primary { background: var(--accent); color: var(--bg); }
+        .btn-secondary { background: rgba(255,255,255,0.1); color: white; }
+        
+        /* History & Water */
+        .stats-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 15px; padding: 0 20px; }
+        .stat-box { background: var(--card); padding: 15px; border-radius: 20px; text-align: center; border: 1px solid rgba(255,255,255,0.05); }
+        .water-icon { font-size: 24px; color: #38bdf8; display: block; margin-bottom: 5px; }
+
+        .list-container { padding: 20px; }
+        .food-item { background: rgba(255,255,255,0.03); margin-bottom: 10px; padding: 15px; border-radius: 15px; display: flex; justify-content: space-between; align-items: center; border-left: 4px solid var(--accent); }
+    </style>
+</head>
+<body>
+
+<div class="app-shell">
+    <header>
+        <div style="font-size: 12px; opacity: 0.6; text-transform: uppercase;">Kalan Kalori</div>
+        <div class="calories-main" id="rem-cal">2500</div>
+        <div style="margin-top: 10px; font-weight: 500;">Bugün: <span id="cur-cal">0</span> / <span id="tar-cal" onclick="changeLimit()">2500</span></div>
+    </header>
+
+    <div id="camera-hub">
+        <video id="video" autoplay playsinline></video>
+        <img id="preview" style="display:none">
+    </div>
+
+    <div class="stats-grid">
+        <div class="stat-box" onclick="addWater()">
+            <span class="water-icon">💧</span>
+            <span id="water-val">0</span> / 10 Bardak
+        </div>
+        <div class="stat-box">
+            <span style="font-size: 24px;">🔥</span>
+            <span id="item-count">0</span> Öğün
+        </div>
+    </div>
+
+    <div id="detection-panel" class="panel hidden">
+        <div id="blacklist-ui" style="display:none;">
+            <div class="warning-alert">🛑 BU YENİLEMEZ!</div>
+            <p id="bad-object-name" style="opacity: 0.7;"></p>
+            <button class="btn btn-secondary" onclick="resetApp()" style="width: 100%;">Geri Dön</button>
+        </div>
+
+        <div id="food-ui">
+            <h2 id="detected-name" style="margin:0; color: var(--accent);">Elma</h2>
+            <p id="calorie-guess" style="opacity: 0.7; margin-bottom: 20px;">Yaklaşık 150 kalori</p>
+            <div class="btn-group">
+                <button class="btn btn-primary" onclick="confirmEntry()">LİSTEYE EKLE</button>
+                <button class="btn btn-secondary" onclick="resetApp()">İPTAL</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="capture-zone" style="padding: 20px;">
+        <button class="btn btn-primary" style="width: 100%; padding: 22px; font-size: 16px; box-shadow: 0 10px 30px rgba(45,212,191,0.2);" onclick="capture()">
+            📸 YEMEĞİ ANALİZ ET
+        </button>
+    </div>
+
+    <div class="list-container">
+        <h3 style="margin-bottom: 15px; opacity: 0.8;">Bugünkü Geçmiş</h3>
+        <div id="history-list"></div>
+    </div>
+</div>
+
+<canvas id="canvas" style="display:none"></canvas>
+
+<script>
+    let model, video, canvas, preview;
+    let target = localStorage.getItem('elite_target') || 2500;
+    let currentTotal = 0;
+    let waterCount = parseInt(localStorage.getItem('elite_water')) || 0;
+    let history = JSON.parse(localStorage.getItem('elite_history')) || [];
+    let currentScan = null;
+
+    // DEVASA KARA LİSTE (Blacklist)
+    const blackListCategories = [
+        "chair", "sofa", "table", "desk", "monitor", "laptop", "mouse", "keyboard", "phone",
+        "sunglasses", "glasses", "shoe", "boot", "sock", "shirt", "jean", "jacket", "hat",
+        "bottle", "cup", "plate", "fork", "knife", "spoon", "remote", "car", "wheel", "bicycle",
+        "napkin", "paper", "book", "pen", "wallet", "bag", "backpack", "clock", "watch",
+        "door", "window", "wall", "brick", "concrete", "pavement", "street", "building"
+    ];
+
+    async function init() {
+        video = document.getElementById('video');
+        canvas = document.getElementById('canvas');
+        preview = document.getElementById('preview');
+        model = await mobilenet.load();
+        const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } });
+        video.srcObject = stream;
+        updateUI();
+    }
+
+    async function capture() {
+        canvas.width = video.videoWidth;
+        canvas.height = video.videoHeight;
+        canvas.getContext('2d').drawImage(video, 0, 0);
+        
+        preview.src = canvas.toDataURL('image/png');
+        preview.style.display = "block";
+        video.style.display = "none";
+        
+        document.getElementById('capture-zone').classList.add('hidden');
+        document.getElementById('detection-panel').classList.remove('hidden');
+
+        const predictions = await model.classify(canvas);
+        const topGuess = predictions[0].className.toLowerCase();
+        
+        analyzeResult(topGuess);
+    }
+
+    function analyzeResult(guess) {
+        const isNotFood = blackListCategories.some(cat => guess.includes(cat));
+        const foodUI = document.getElementById('food-ui');
+        const badUI = document.getElementById('blacklist-ui');
+
+        if (isNotFood) {
+            foodUI.style.display = "none";
+            badUI.style.display = "block";
+            document.getElementById('bad-object-name').innerText = `Tespit edilen nesne: ${guess.split(',')[0]} (Bu bir eşya veya maddedir)`;
+        } else {
+            badUI.style.display = "none";
+            foodUI.style.display = "block";
+            let cal = Math.floor(Math.random() * 200) + 50; // Gerçek veritabanı bağlana kadar simülasyon
+            currentScan = { name: guess.split(',')[0], cal: cal };
+            document.getElementById('detected-name').innerText = currentScan.name.toUpperCase();
+            document.getElementById('calorie-guess').innerText = `${cal} Kalori | Onaylıyor musun?`;
+        }
+    }
+
+    function confirmEntry() {
+        if(!currentScan) return;
+        history.unshift({ ...currentScan, id: Date.now(), time: new Date().toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'}) });
+        localStorage.setItem('elite_history', JSON.stringify(history));
+        updateUI();
+        resetApp();
+    }
+
+    function resetApp() {
+        preview.style.display = "none";
+        video.style.display = "block";
+        document.getElementById('detection-panel').classList.add('hidden');
+        document.getElementById('capture-zone').classList.remove('hidden');
+        currentScan = null;
+    }
+
+    function updateUI() {
+        let total = 0;
+        const list = document.getElementById('history-list');
+        list.innerHTML = '';
+        history.forEach(item => {
+            total += item.cal;
+            list.innerHTML += `
+                <div class="food-item">
+                    <div><b>${item.name}</b><br><small style="opacity:0.5">${item.time}</small></div>
+                    <div style="color:var(--accent)">+${item.cal} kcal</div>
+                </div>`;
+        });
+        currentTotal = total;
+        document.getElementById('tar-cal').innerText = target;
+        document.getElementById('cur-cal').innerText = total;
+        document.getElementById('rem-cal').innerText = target - total;
+        document.getElementById('water-val').innerText = waterCount;
+        document.getElementById('item-count').innerText = history.length;
+    }
+
+    function addWater() {
+        waterCount++;
+        localStorage.setItem('elite_water', waterCount);
+        updateUI();
+    }
+
+    function changeLimit() {
+        const val = prompt("Yeni kalori hedefiniz:", target);
+        if(val) { target = val; localStorage.setItem('elite_target', target); updateUI(); }
+    }
+
+    init();
+</script>
+</body>
+</html>
